@@ -2,8 +2,11 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { DatabaseTypes } from "@/types/database.types";
+import { EventHeader } from "@/components/EventHeader";
 
-type Event = DatabaseTypes["public"]["Tables"]["events"]["Row"];
+type Event = DatabaseTypes["public"]["Tables"]["events"]["Row"] & {
+  Número_evento: number;
+};
 
 interface Participant {
   id: string;
@@ -22,6 +25,10 @@ interface ParticipantResponse {
 interface ParticipantWithCosts extends ParticipantResponse {
   valor_total: number;
   valor_a_pagar: number;
+  detalhes_custo: {
+    valor_por_participante: number;
+    descricao: string;
+  }[];
 }
 
 interface CostItem {
@@ -86,11 +93,17 @@ function EventDetails() {
 
       setEvent(eventData);
 
-      const { data: participantsData, error: participantsError } =
-        await supabase
-          .from("event_participants")
-          .select(
-            `
+      const { data: allParticipantsData, error: allParticipantsError } = await supabase
+        .from("participants")
+        .select("*")
+        .order("name");
+
+      if (allParticipantsError) throw allParticipantsError;
+      setAllParticipants(allParticipantsData || []);
+
+      const { data: eventParticipantsData, error: eventParticipantsError } = await supabase
+        .from("event_participants")
+        .select(`
           id,
           event_id,
           participant_id,
@@ -100,38 +113,32 @@ function EventDetails() {
             id,
             name
           )
-        `
-          )
-          .eq("event_id", id);
+        `)
+        .eq("event_id", id);
 
-      if (participantsError) throw participantsError;
+      if (eventParticipantsError) throw eventParticipantsError;
 
-      if (participantsData) {
+      if (eventParticipantsData) {
         const typedParticipantsData =
-          participantsData as unknown as ParticipantResponse[];
+          eventParticipantsData as unknown as ParticipantResponse[];
         const participantsWithCosts = await Promise.all(
           typedParticipantsData.map(async (p) => {
-            const { data: costData } = await supabase
-              .from("participant_costs")
-              .select("valor_por_participante")
+            // Buscar detalhes de custo para cada participante
+            const { data: custosData } = await supabase
+              .from("detalhe_de_custo")
+              .select("valor_por_participante, descricao")
               .eq("event_id", id)
               .eq("participant_id", p.participant_id);
 
-            const valorTotal =
-              costData?.reduce((sum, item) => {
-                console.log(
-                  `Valor para ${p.participant_name}:`,
-                  item.valor_por_participante
-                );
-                return sum + (Number(item.valor_por_participante) || 0);
-              }, 0) || 0;
-
-            console.log(`Total para ${p.participant_name}:`, valorTotal);
+            const valorTotal = custosData?.reduce((sum, item) => {
+              return sum + (Number(item.valor_por_participante) || 0);
+            }, 0) || 0;
 
             return {
               ...p,
               valor_total: valorTotal,
               valor_a_pagar: valorTotal,
+              detalhes_custo: custosData || []
             };
           })
         );
@@ -233,6 +240,7 @@ function EventDetails() {
         ...typedData,
         valor_total: 0,
         valor_a_pagar: 0,
+        detalhes_custo: [],
       };
 
       setEventParticipants((prev) => [...prev, newParticipant]);
@@ -316,6 +324,7 @@ function EventDetails() {
           ...typedData,
           valor_total: 0,
           valor_a_pagar: 0,
+          detalhes_custo: [],
         };
 
         setEventParticipants((prev) =>
@@ -339,7 +348,7 @@ function EventDetails() {
     });
   };
 
-  // Função para filtrar participantes por status
+  // Função para obter participantes por status
   const getParticipantsByStatus = (status: "confirmed" | "pending") => {
     return eventParticipants.filter((ep) => ep.status === status);
   };
@@ -582,14 +591,21 @@ function EventDetails() {
     }
   };
 
-  // Adicione esta função para excluir o participante
+  // Atualizar a função handleDeleteParticipant
   const handleDeleteParticipant = async (participantId: string) => {
     try {
+      if (!id) return;
+
       // Primeiro verifica se o participante está em algum evento
-      const { data: eventParticipantData } = await supabase
+      const { data: eventParticipantData, error: checkError } = await supabase
         .from("event_participants")
         .select("*")
         .eq("participant_id", participantId);
+
+      if (checkError) {
+        console.error("Erro ao verificar participante:", checkError);
+        throw checkError;
+      }
 
       if (eventParticipantData && eventParticipantData.length > 0) {
         alert("Não é possível excluir um participante que está em um evento.");
@@ -597,18 +613,21 @@ function EventDetails() {
       }
 
       // Se não estiver em nenhum evento, pode excluir
-      const { error } = await supabase
+      const { error: deleteError } = await supabase
         .from("participants")
         .delete()
         .eq("id", participantId);
 
-      if (error) {
-        console.error("Erro ao excluir:", error);
-        throw error;
+      if (deleteError) {
+        console.error("Erro ao excluir:", deleteError);
+        throw deleteError;
       }
 
       // Atualiza a lista de participantes
-      await fetchAllParticipants();
+      setAllParticipants((prev) => prev.filter((p) => p.id !== participantId));
+      
+      // Opcional: mostrar mensagem de sucesso
+      alert("Participante excluído com sucesso!");
     } catch (err) {
       console.error("Erro ao excluir participante:", err);
       alert("Erro ao excluir participante. Tente novamente.");
@@ -617,242 +636,177 @@ function EventDetails() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F1F0FB] p-8">
-        <div className="flex justify-center items-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#10B981]"></div>
+      <div className="min-h-screen bg-[#F1F0FB] p-3 sm:p-6">
+        <div className="max-w-7xl mx-auto">
+          <button
+            onClick={() => navigate("/historico-eventos")}
+            className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-2 mb-3"
+          >
+            ← Voltar
+          </button>
+
+          <div className="flex justify-center items-center h-[60vh]">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#10B981]"></div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F1F0FB] p-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen bg-[#F1F0FB] p-3 sm:p-6">
+      <div className="max-w-7xl mx-auto">
         <button
           onClick={() => navigate("/historico-eventos")}
-          className="text-gray-600 hover:text-gray-800 flex items-center gap-2 mb-8"
+          className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-2 mb-3"
         >
           ← Voltar
         </button>
 
         {loading ? (
-          <div className="flex justify-center items-center">
+          <div className="flex justify-center items-center h-[60vh]">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#10B981]"></div>
           </div>
         ) : error ? (
-          <div className="text-center text-red-600 bg-red-50 p-4 rounded-lg">
+          <div className="text-center text-red-600 bg-red-50 p-3 rounded">
             {error}
           </div>
         ) : event ? (
           <>
-            <div className="text-center mb-8">
-              {/* Número e Nome do Evento */}
-              <h1 className="text-4xl font-bold text-[#0EA5E9] mb-4">
-                {event.title} - Nº {event.numero}
+            <div className="mb-4">
+              <h1 className="text-lg sm:text-xl font-semibold text-gray-800">
+                {event.title}
               </h1>
-
-              {/* Descrição (se necessário) */}
-              {event.description && (
-                <p className="text-lg text-gray-600 mb-4">
-                  {event.description}
-                </p>
-              )}
-
-              {/* Data e Hora */}
-              <p className="text-gray-500">
-                <span className="inline-block">
-                  <svg
-                    className="w-5 h-5 inline-block mr-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  {formatDateTime(event.date)}
-                </span>
-              </p>
+              <p className="text-sm text-gray-500">Nº {event.Número_evento || ''}</p>
             </div>
 
-            <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-              <span
-                className={`px-3 py-1 rounded-full text-sm ${
-                  event.status === "active"
-                    ? "bg-green-100 text-green-800"
-                    : "bg-red-100 text-red-800"
-                }`}
-              >
-                Em andamento
+            <div className="mb-4">
+              <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
+                event.status === "active" 
+                  ? "bg-green-100 text-green-800" 
+                  : "bg-red-100 text-red-800"
+              }`}>
+                {event.status === "active" ? "Em andamento" : "Finalizado"}
               </span>
             </div>
 
-            {/* Cards de Valores */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <h3 className="text-sm text-gray-600">Valor Total</h3>
-                <p className="text-xl font-bold">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              <div className="bg-white rounded p-3 shadow-sm">
+                <p className="text-xs text-gray-500 mb-1">Valor Total</p>
+                <p className="text-base font-medium">
                   {formatCurrency(calcularValorTotal())}
                 </p>
               </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <h3 className="text-sm text-gray-600">
-                  Valor por Participante
-                </h3>
-                <p className="text-xl font-bold">
+              
+              <div className="bg-white rounded p-3 shadow-sm">
+                <p className="text-xs text-gray-500 mb-1">Valor por Participante</p>
+                <p className="text-base font-medium">
                   {formatCurrency(calcularValorPorParticipante())}
                 </p>
               </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <h3 className="text-sm text-gray-600">
-                  Total de Participantes
-                </h3>
-                <p className="text-xl font-bold">
+              
+              <div className="bg-white rounded p-3 shadow-sm">
+                <p className="text-xs text-gray-500 mb-1">Total de Participantes</p>
+                <p className="text-base font-medium">
                   {getParticipantsByStatus("confirmed").length}
                 </p>
               </div>
             </div>
 
-            {/* Grid principal */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Lista de Participantes */}
-              <div className="bg-white rounded-lg shadow-sm p-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-medium text-gray-700">
-                    Participantes
-                  </h3>
-                  <button
-                    onClick={() => setIsNewParticipantModalOpen(true)}
-                    className="bg-[#4ADE80] text-white px-4 py-2 rounded-lg text-sm hover:bg-green-500 transition-colors"
-                  >
-                    + Novo
-                  </button>
+            <div className="grid grid-cols-1 gap-4">
+              <div className="bg-white rounded shadow-sm">
+                <div className="p-3 border-b">
+                  <h2 className="text-sm font-medium">
+                    Participantes Confirmados ({getParticipantsByStatus("confirmed").length})
+                  </h2>
                 </div>
-
-                <div className="space-y-2">
-                  {allParticipants
-                    .filter(
-                      (p) =>
-                        !eventParticipants.some(
-                          (ep) => ep.participant_id === p.id
-                        )
-                    )
-                    .map((participant) => (
-                      <div
-                        key={participant.id}
-                        className="flex justify-between items-center p-2 bg-gray-50 rounded"
-                      >
-                        <span className="text-sm">{participant.name}</span>
-                        <div className="flex gap-3">
+                
+                <div className="p-3">
+                  <div className="space-y-3">
+                    {getParticipantsByStatus("confirmed").map((ep) => (
+                      <div key={ep.id} className="bg-gray-50 rounded p-3">
+                        <div className="flex justify-between items-start">
+                          <span className="text-base">{ep.participant.name}</span>
+                          <span className="text-gray-600">{formatCurrency(ep.valor_total || 0)}</span>
+                        </div>
+                        
+                        <div className={`mt-1 ${
+                          calcularSaldoParticipante(ep.valor_total || 0) >= 0 
+                            ? "text-green-600" 
+                            : "text-red-600"
+                        }`}>
+                          {calcularSaldoParticipante(ep.valor_total || 0) >= 0 ? "Receber" : "Pagar"}
+                          <div className="text-lg">
+                            {formatCurrency(Math.abs(calcularSaldoParticipante(ep.valor_total || 0)))}
+                          </div>
+                        </div>
+                        
+                        <div className="flex gap-4 mt-2 text-sm">
                           <button
-                            onClick={() =>
-                              addParticipantToEvent(participant.id)
-                            }
-                            className="text-green-600 text-sm hover:text-green-800"
+                            onClick={() => handleOpenCostModal(ep)}
+                            className="text-blue-600 hover:underline"
                           >
-                            Confirmar
+                            adicionar valor
                           </button>
                           <button
-                            onClick={() =>
-                              handleDeleteParticipant(participant.id)
-                            }
-                            className="text-red-600 hover:text-red-800"
-                            title="Excluir participante"
+                            onClick={() => removeParticipantFromEvent(ep.participant_id)}
+                            className="text-red-600 hover:underline"
                           >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="h-5 w-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
-                            </svg>
+                            remover
                           </button>
                         </div>
                       </div>
                     ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Lista de Participantes Confirmados */}
-              <div className="bg-white rounded-lg p-6">
-                <h2 className="text-2xl mb-6">
-                  Participantes Confirmados (
-                  {getParticipantsByStatus("confirmed").length})
-                </h2>
+              <div className="bg-white rounded shadow-sm">
+                <div className="p-3 border-b">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-sm font-medium">Participantes</h2>
+                    <button
+                      onClick={() => setIsNewParticipantModalOpen(true)}
+                      className="bg-[#4ADE80] text-white px-2 py-1 rounded text-xs hover:bg-green-500 transition-colors"
+                    >
+                      + Novo
+                    </button>
+                  </div>
+                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {getParticipantsByStatus("confirmed").map((ep) => (
-                    <div key={ep.id} className="bg-white rounded-lg border p-4">
-                      {/* Nome do Participante */}
-                      <div className="text-xl mb-1">{ep.participant.name}</div>
-
-                      {/* Status e Valor */}
-                      <div>
-                        {/* Valor Total Contribuído */}
-                        <div className="text-gray-600 text-sm mb-1">
-                          R$ {(ep.valor_total || 0).toFixed(2)}
-                        </div>
-
-                        {/* Status Pagar/Receber */}
-                        <div
-                          className={`text-sm ${
-                            calcularSaldoParticipante(ep.valor_total || 0) >= 0
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
+                <div className="p-3">
+                  <div className="space-y-2">
+                    {allParticipants
+                      .filter(p => !eventParticipants.some(ep => ep.participant_id === p.id))
+                      .map(participant => (
+                        <div key={participant.id} 
+                          className="flex items-center justify-between p-2 bg-gray-50 rounded"
                         >
-                          {calcularSaldoParticipante(ep.valor_total || 0) >= 0
-                            ? "Receber"
-                            : "Pagar"}
+                          <span className="text-sm">{participant.name}</span>
+                          <div className="flex gap-4">
+                            <button
+                              onClick={() => addParticipantToEvent(participant.id)}
+                              className="text-green-600 hover:underline text-sm"
+                            >
+                              Confirmar
+                            </button>
+                            <button
+                              onClick={() => handleDeleteParticipant(participant.id)}
+                              className="text-red-600 hover:underline text-sm"
+                            >
+                              remover
+                            </button>
+                          </div>
                         </div>
-                        <div className="text-xl">
-                          R${" "}
-                          {Math.abs(
-                            calcularSaldoParticipante(ep.valor_total || 0)
-                          ).toFixed(2)}
-                        </div>
-                      </div>
-
-                      {/* Links de ação */}
-                      <div className="flex justify-end gap-4 mt-2 text-sm">
-                        <button
-                          onClick={() => handleOpenCostModal(ep)}
-                          className="text-blue-600 hover:text-blue-800"
-                        >
-                          adicionar valor
-                        </button>
-                        <button
-                          onClick={() =>
-                            removeParticipantFromEvent(ep.participant_id)
-                          }
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          remover
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                      ))}
+                  </div>
                 </div>
               </div>
             </div>
           </>
-        ) : (
-          <div className="text-center text-gray-600">Evento não encontrado</div>
-        )}
+        ) : null}
       </div>
 
-      {/* Adicione o Modal */}
       {isModalOpen && selectedParticipant && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
@@ -956,7 +910,6 @@ function EventDetails() {
         </div>
       )}
 
-      {/* Modal de Novo Participante */}
       {isNewParticipantModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
