@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,37 +7,41 @@ import { SelectParticipantsHeader } from "@/components/SelectParticipantsHeader"
 import { EventHeader } from "@/components/EventHeader";
 import { ParticipantManager } from "@/components/ParticipantManager";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { DatabaseTypes } from "@/types/database.types";
+
+type Event = DatabaseTypes["public"]["Tables"]["events"]["Row"];
 
 const SelectParticipants = () => {
   const { eventId } = useParams();
   const queryClient = useQueryClient();
-
-  const { data: event } = useQuery({
-    queryKey: ["event", eventId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("events")
-        .select("*, Numero_evento") // Corrigindo o nome do campo
-        .eq("id", eventId)
-        .single();
-
-      if (error) throw error;
-      return data;
-    },
+  const [event, setEvent] = useState<Event>({
+    id: "",
+    title: "",
+    description: "",
+    date: "",
+    numero: 0,
+    status: "active",
+    created_at: "",
+    participantsCount: 0,
+    totalValue: 0,
+    valuePerParticipant: 0,
   });
 
   const { data: eventParticipants } = useQuery({
     queryKey: ["event-participants", eventId],
     queryFn: async () => {
-      const { data: participantsData, error: participantsError } = await supabase
-        .from("event_participants")
-        .select(`
+      const { data: participantsData, error: participantsError } =
+        await supabase
+          .from("event_participants")
+          .select(
+            `
           id,
           participant_id,
           participant_name,
           status
-        `)
-        .eq("event_id", eventId);
+        `
+          )
+          .eq("event_id", eventId);
 
       if (participantsError) throw participantsError;
       return participantsData;
@@ -47,18 +51,17 @@ const SelectParticipants = () => {
   const { data: availableParticipants } = useQuery({
     queryKey: ["participants"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("participants")
-        .select("*");
+      const { data, error } = await supabase.from("participants").select("*");
 
       if (error) throw error;
       return data;
     },
   });
 
-  const selectedParticipants = eventParticipants
-    ?.filter(ep => ep.status === "confirmed")
-    .map(ep => ep.participant_id) || [];
+  const selectedParticipants =
+    eventParticipants
+      ?.filter((ep) => ep.status === "confirmed")
+      .map((ep) => ep.participant_id) || [];
 
   const addParticipantMutation = useMutation({
     mutationFn: async (participant: { name: string; email?: string }) => {
@@ -74,12 +77,14 @@ const SelectParticipants = () => {
       // Then insert into event_participants with both participant_id and participant_name
       const { error: eventParticipantError } = await supabase
         .from("event_participants")
-        .insert([{
-          event_id: eventId,
-          participant_id: newParticipant.id,
-          participant_name: newParticipant.name,
-          status: "pending"
-        }]);
+        .insert([
+          {
+            event_id: eventId,
+            participant_id: newParticipant.id,
+            participant_name: newParticipant.name,
+            status: "pending",
+          },
+        ]);
 
       if (eventParticipantError) throw eventParticipantError;
 
@@ -87,9 +92,15 @@ const SelectParticipants = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["participants"] });
-      queryClient.invalidateQueries({ queryKey: ["event-participants", eventId] });
-      queryClient.invalidateQueries({ queryKey: ["confirmed-participants", eventId] });
-      queryClient.invalidateQueries({ queryKey: ["participants-count", eventId] });
+      queryClient.invalidateQueries({
+        queryKey: ["event-participants", eventId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["confirmed-participants", eventId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["participants-count", eventId],
+      });
       toast.success("Participante adicionado com sucesso!");
     },
     onError: () => {
@@ -114,9 +125,9 @@ const SelectParticipants = () => {
       const { data: existingParticipants, error: checkError } = await supabase
         .from("event_participants")
         .select("*")
-        .match({ 
+        .match({
           event_id: eventId,
-          participant_id: participantId 
+          participant_id: participantId,
         });
 
       if (checkError) {
@@ -126,15 +137,16 @@ const SelectParticipants = () => {
       }
 
       const existingParticipant = existingParticipants?.[0];
-      const newStatus = existingParticipant?.status === "confirmed" ? "pending" : "confirmed";
+      const newStatus =
+        existingParticipant?.status === "confirmed" ? "pending" : "confirmed";
 
       if (existingParticipant) {
         const { error: updateError } = await supabase
           .from("event_participants")
           .update({ status: newStatus })
-          .match({ 
+          .match({
             event_id: eventId,
-            participant_id: participantId 
+            participant_id: participantId,
           });
 
         if (updateError) {
@@ -145,12 +157,14 @@ const SelectParticipants = () => {
       } else {
         const { error: insertError } = await supabase
           .from("event_participants")
-          .insert([{
-            event_id: eventId,
-            participant_id: participantId,
-            participant_name: participant.name,
-            status: "pending"
-          }]);
+          .insert([
+            {
+              event_id: eventId,
+              participant_id: participantId,
+              participant_name: participant.name,
+              status: "pending",
+            },
+          ]);
 
         if (insertError) {
           console.error("Error inserting participant:", insertError);
@@ -159,9 +173,15 @@ const SelectParticipants = () => {
         }
       }
 
-      queryClient.invalidateQueries({ queryKey: ["event-participants", eventId] });
-      queryClient.invalidateQueries({ queryKey: ["confirmed-participants", eventId] });
-      queryClient.invalidateQueries({ queryKey: ["participants-count", eventId] });
+      queryClient.invalidateQueries({
+        queryKey: ["event-participants", eventId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["confirmed-participants", eventId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["participants-count", eventId],
+      });
       toast.success("Status do participante atualizado com sucesso!");
     } catch (error) {
       console.error("Error toggling participant:", error);
@@ -169,11 +189,36 @@ const SelectParticipants = () => {
     }
   };
 
+  useEffect(() => {
+    if (eventId) {
+      fetchEventDetails();
+    }
+  }, [eventId]);
+
+  const fetchEventDetails = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("events")
+        .select("*")
+        .eq("id", eventId)
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setEvent(data);
+      }
+    } catch (error) {
+      console.error("Error fetching event details:", error);
+    }
+  };
+
   if (!event) {
     return (
       <div className="h-screen bg-[#F1F0FB] dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">Carregando dados do evento...</p>
+          <p className="text-sm text-muted-foreground">
+            Carregando dados do evento...
+          </p>
         </div>
       </div>
     );
@@ -188,7 +233,7 @@ const SelectParticipants = () => {
               title={event.title}
               description={event.description}
               date={event.date}
-              numero={event.numero} // Passando o número do evento
+              numero={event.numero}
             />
 
             <SelectParticipantsHeader
@@ -198,7 +243,7 @@ const SelectParticipants = () => {
 
             <div className="flex-1">
               <ParticipantManager
-                eventId={eventId}
+                eventId={eventId || ""}
                 availableParticipants={availableParticipants || []}
                 selectedParticipants={selectedParticipants}
                 onToggleParticipant={handleToggleParticipant}
