@@ -16,12 +16,14 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
     "allowJs": true,
-    "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "types": ["node"]
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
