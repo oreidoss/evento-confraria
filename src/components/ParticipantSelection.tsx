@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { AddParticipantDialog } from "./AddParticipantDialog";
 import { AvailableParticipantsList } from "./AvailableParticipantsList";
@@ -19,6 +18,18 @@ interface ParticipantSelectionProps {
   eventId: string | undefined;
 }
 
+interface ConfirmedParticipant {
+  id: string;
+  participant_id: string;
+  participants: {
+    id: string;
+    name: string;
+    email?: string;
+  };
+  totalCosts: number;
+  balance: number;
+}
+
 export const ParticipantSelection = ({
   availableParticipants,
   selectedParticipants,
@@ -29,10 +40,11 @@ export const ParticipantSelection = ({
   onSubmit,
   eventId,
 }: ParticipantSelectionProps) => {
-  const [selectedParticipantForCosts, setSelectedParticipantForCosts] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [selectedParticipantForCosts, setSelectedParticipantForCosts] =
+    useState<{
+      id: string;
+      name: string;
+    } | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -40,20 +52,26 @@ export const ParticipantSelection = ({
     if (!eventId) return;
 
     const channel = supabase
-      .channel('event-participants-changes')
+      .channel("event-participants-changes")
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'event_participants',
-          filter: `event_id=eq.${eventId}`
+          event: "*",
+          schema: "public",
+          table: "event_participants",
+          filter: `event_id=eq.${eventId}`,
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ["event-participants"] });
-          queryClient.invalidateQueries({ queryKey: ["confirmed-participants", eventId] });
-          queryClient.invalidateQueries({ queryKey: ["participants-count", eventId] });
-          queryClient.invalidateQueries({ queryKey: ["participant-costs", eventId] });
+          queryClient.invalidateQueries({
+            queryKey: ["confirmed-participants", eventId],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["participants-count", eventId],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["participant-costs", eventId],
+          });
         }
       )
       .subscribe();
@@ -92,14 +110,24 @@ export const ParticipantSelection = ({
             eventId={eventId}
             availableParticipants={availableParticipants}
             selectedParticipants={selectedParticipants}
-            onSelectForCosts={(participant) => setSelectedParticipantForCosts(participant)}
+            onSelectForCosts={(participant: ConfirmedParticipant) =>
+              setSelectedParticipantForCosts({
+                id: participant.participant_id,
+                name: participant.participants.name,
+              })
+            }
           />
         </div>
       </div>
 
-      <div className="mt-1">
-        <ParticipantCostsManager eventId={eventId} />
-      </div>
+      {selectedParticipantForCosts && eventId && (
+        <div className="mt-1">
+          <ParticipantCostsManager
+            eventId={eventId}
+            participantId={selectedParticipantForCosts.id}
+          />
+        </div>
+      )}
     </div>
   );
 };
