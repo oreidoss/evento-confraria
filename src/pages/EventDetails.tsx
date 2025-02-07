@@ -63,6 +63,9 @@ function EventDetails() {
   const [isNewParticipantModalOpen, setIsNewParticipantModalOpen] =
     useState(false);
   const [newParticipant, setNewParticipant] = useState({ name: "", phone: "" });
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
 
   useEffect(() => {
     if (!id) {
@@ -73,6 +76,7 @@ function EventDetails() {
 
     fetchEventDetails();
     fetchAllParticipants();
+    fetchParticipants();
   }, [id]);
 
   const fetchEventDetails = async () => {
@@ -168,33 +172,57 @@ function EventDetails() {
     }
   };
 
+  const fetchParticipants = async () => {
+    try {
+      const { data: participantsData, error } = await supabase
+        .from('participants')
+        .select('*')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Erro ao buscar participantes:', error);
+        throw error;
+      }
+
+      setParticipants(participantsData || []);
+    } catch (err) {
+      console.error('Erro ao carregar participantes:', err);
+      alert('Erro ao carregar lista de participantes');
+    }
+  };
+
+  // Função para mostrar apenas participantes válidos da tabela
+  const getAvailableParticipants = () => {
+    // Retorna apenas participantes que existem na tabela participants
+    return participants
+      .filter(participant => 
+        // Filtra apenas os que não estão confirmados no evento atual
+        !eventParticipants.some(ep => ep.participant_id === participant.id)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  // Função para obter participantes confirmados em ordem alfabética
+  const getConfirmedParticipants = () => {
+    return eventParticipants
+      .sort((a, b) => a.participant.name.localeCompare(b.participant.name));
+  };
+
+  // Ajustar a função addParticipantToEvent
   const addParticipantToEvent = async (participantId: string) => {
     try {
       if (!id) {
-        const msg = "ID do evento não encontrado";
-        console.error(msg);
-        alert(msg);
+        alert("ID do evento não encontrado");
         return;
       }
 
-      const participant = allParticipants.find((p) => p.id === participantId);
-
+      const participant = participants.find((p) => p.id === participantId);
       if (!participant) {
-        console.error("Participante não encontrado");
+        alert("Participante não encontrado");
         return;
       }
 
-      const participanteJaExiste = eventParticipants.some(
-        (ep) => ep.participant_id === participantId
-      );
-
-      if (participanteJaExiste) {
-        const msg = "Este participante já está no evento";
-        console.error(msg);
-        alert(msg);
-        return;
-      }
-
+      // Adicionar participante ao evento
       const { data, error: insertError } = await supabase
         .from("event_participants")
         .insert({
@@ -202,7 +230,8 @@ function EventDetails() {
           participant_id: participantId,
           participant_name: participant.name,
           status: "confirmed",
-        }).select(`
+        })
+        .select(`
           id,
           event_id,
           participant_id,
@@ -212,44 +241,31 @@ function EventDetails() {
             id,
             name
           )
-        `);
+        `)
+        .single();
 
       if (insertError) {
-        console.error("Erro detalhado ao adicionar participante:", insertError);
-
-        if (insertError.code === "23503") {
-          alert("Erro: Participante ou evento não encontrado.");
-        } else if (insertError.code === "23505") {
-          alert("Este participante já está registrado no evento.");
-        } else {
-          alert(
-            "Erro ao adicionar participante ao evento. Por favor, tente novamente."
-          );
-        }
+        console.error("Erro ao adicionar participante:", insertError);
+        alert("Erro ao adicionar participante ao evento");
         return;
       }
 
-      if (!data || data.length === 0) {
-        console.error("Nenhum dado retornado após inserção");
-        alert("Erro ao adicionar participante. Nenhum dado retornado.");
-        return;
-      }
-
-      const typedData = data[0] as unknown as ParticipantResponse;
+      // Adicionar o novo participante à lista de confirmados
       const newParticipant: ParticipantWithCosts = {
-        ...typedData,
+        ...data,
         valor_total: 0,
         valor_a_pagar: 0,
         detalhes_custo: [],
       };
 
-      setEventParticipants((prev) => [...prev, newParticipant]);
-      console.log("Participante adicionado com sucesso:", newParticipant);
+      setEventParticipants(prev => [...prev, newParticipant]);
+
+      // Atualizar a lista de participantes disponíveis
+      await fetchEventDetails();
+
     } catch (err) {
-      console.error("Erro ao adicionar participante:", err);
-      alert(
-        "Erro ao adicionar participante ao evento. Por favor, tente novamente."
-      );
+      console.error("Erro:", err);
+      alert("Erro ao adicionar participante ao evento");
     }
   };
 
@@ -594,43 +610,83 @@ function EventDetails() {
   // Atualizar a função handleDeleteParticipant
   const handleDeleteParticipant = async (participantId: string) => {
     try {
-      if (!id) return;
-
-      // Primeiro verifica se o participante está em algum evento
-      const { data: eventParticipantData, error: checkError } = await supabase
-        .from("event_participants")
-        .select("*")
-        .eq("participant_id", participantId);
-
-      if (checkError) {
-        console.error("Erro ao verificar participante:", checkError);
-        throw checkError;
-      }
-
-      if (eventParticipantData && eventParticipantData.length > 0) {
-        alert("Não é possível excluir um participante que está em um evento.");
+      if (!window.confirm('Tem certeza que deseja excluir este participante permanentemente?')) {
         return;
       }
 
-      // Se não estiver em nenhum evento, pode excluir
-      const { error: deleteError } = await supabase
-        .from("participants")
+      // 1. Verificar se o participante existe
+      const { data: participantExists, error: checkError } = await supabase
+        .from('participants')
+        .select('id')
+        .eq('id', participantId)
+        .single();
+
+      if (checkError || !participantExists) {
+        throw new Error('Participante não encontrado');
+      }
+
+      // 2. Excluir custos primeiro
+      await supabase
+        .from('detalhe_de_custo')
         .delete()
-        .eq("id", participantId);
+        .eq('participant_id', participantId);
+
+      // 3. Excluir relações com eventos
+      await supabase
+        .from('event_participants')
+        .delete()
+        .eq('participant_id', participantId);
+
+      // 4. Finalmente excluir o participante
+      const { error: deleteError } = await supabase
+        .from('participants')
+        .delete()
+        .eq('id', participantId);
 
       if (deleteError) {
-        console.error("Erro ao excluir:", deleteError);
         throw deleteError;
       }
 
-      // Atualiza a lista de participantes
-      setAllParticipants((prev) => prev.filter((p) => p.id !== participantId));
+      // 5. Atualizar estados locais
+      setParticipants(prev => prev.filter(p => p.id !== participantId));
+      setEventParticipants(prev => prev.filter(p => p.participant_id !== participantId));
+      setAllParticipants(prev => prev.filter(p => p.id !== participantId));
+
+      // 6. Recarregar dados
+      await fetchParticipants();
+      await fetchEventDetails();
+
+      alert('Participante excluído com sucesso!');
+
+    } catch (error) {
+      console.error('Erro ao excluir participante:', error);
+      alert('Erro ao excluir participante. Por favor, tente novamente.');
+    }
+  };
+
+  // Adicionar função para atualizar o título
+  const handleUpdateEventTitle = async (newTitle: string) => {
+    try {
+      if (!id || !newTitle.trim()) return;
+
+      const { error } = await supabase
+        .from('events')
+        .update({ title: newTitle.trim() })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Atualizar o estado local
+      setEvent(prev => prev ? { ...prev, title: newTitle } : null);
+      setIsEditingTitle(false);
       
-      // Opcional: mostrar mensagem de sucesso
-      alert("Participante excluído com sucesso!");
-    } catch (err) {
-      console.error("Erro ao excluir participante:", err);
-      alert("Erro ao excluir participante. Tente novamente.");
+      // Recarregar os dados
+      await fetchEventDetails();
+
+      alert('Nome do evento atualizado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao atualizar nome do evento:', error);
+      alert('Erro ao atualizar nome do evento. Por favor, tente novamente.');
     }
   };
 
@@ -674,9 +730,49 @@ function EventDetails() {
         ) : event ? (
           <>
             <div className="mb-4">
-              <h1 className="text-lg sm:text-xl font-semibold text-gray-800">
-                {event.title}
-              </h1>
+              <div className="flex items-center gap-2">
+                {isEditingTitle ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      className="border rounded px-2 py-1 text-lg font-semibold text-gray-800"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => handleUpdateEventTitle(editedTitle)}
+                      className="text-green-600 hover:text-green-700"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsEditingTitle(false);
+                        setEditedTitle(event?.title || '');
+                      }}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <h1 className="text-lg sm:text-xl font-semibold text-gray-800">
+                      {event?.title}
+                    </h1>
+                    <button
+                      onClick={() => {
+                        setEditedTitle(event?.title || '');
+                        setIsEditingTitle(true);
+                      }}
+                      className="text-gray-500 hover:text-gray-700"
+                    >
+                      <span className="text-xl">✏️</span>
+                    </button>
+                  </>
+                )}
+              </div>
               <p className="text-sm text-gray-500">Nº {event.Número_evento || ''}</p>
             </div>
 
@@ -723,7 +819,7 @@ function EventDetails() {
                 
                 <div className="p-3">
                   <div className="space-y-3">
-                    {getParticipantsByStatus("confirmed").map((ep) => (
+                    {getConfirmedParticipants().map((ep) => (
                       <div key={ep.id} className="bg-gray-50 rounded p-3">
                         <div className="flex justify-between items-start">
                           <span className="text-base">{ep.participant.name}</span>
@@ -776,29 +872,27 @@ function EventDetails() {
 
                 <div className="p-3">
                   <div className="space-y-2">
-                    {allParticipants
-                      .filter(p => !eventParticipants.some(ep => ep.participant_id === p.id))
-                      .map(participant => (
-                        <div key={participant.id} 
-                          className="flex items-center justify-between p-2 bg-gray-50 rounded"
-                        >
-                          <span className="text-sm">{participant.name}</span>
-                          <div className="flex gap-4">
-                            <button
-                              onClick={() => addParticipantToEvent(participant.id)}
-                              className="text-green-600 hover:underline text-sm"
-                            >
-                              Confirmar
-                            </button>
-                            <button
-                              onClick={() => handleDeleteParticipant(participant.id)}
-                              className="text-red-600 hover:underline text-sm"
-                            >
-                              remover
-                            </button>
-                          </div>
+                    {getAvailableParticipants().map(participant => (
+                      <div key={participant.id} 
+                        className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                      >
+                        <span className="text-sm">{participant.name}</span>
+                        <div className="flex gap-4">
+                          <button
+                            onClick={() => addParticipantToEvent(participant.id)}
+                            className="text-green-600 hover:underline text-sm"
+                          >
+                            Confirmar
+                          </button>
+                          <button
+                            onClick={() => handleDeleteParticipant(participant.id)}
+                            className="text-red-600 hover:underline text-sm"
+                          >
+                            remover
+                          </button>
                         </div>
-                      ))}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

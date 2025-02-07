@@ -134,35 +134,54 @@ function EventHistory() {
     }
   };
 
-  const handleDelete = async (eventId: string) => {
+  const handleDeleteEvent = async (eventId: string) => {
     try {
-      if (!confirm("Tem certeza que deseja excluir este evento?")) {
+      if (!window.confirm('Tem certeza que deseja excluir este evento permanentemente?')) {
         return;
       }
 
-      // Primeiro verificar se há participantes ou custos
-      const { count: participantsCount } = await supabase
-        .from("event_participants")
-        .select("*", { count: "exact", head: true })
-        .eq("event_id", eventId);
-
-      if (participantsCount && participantsCount > 0) {
-        alert("Não é possível excluir um evento que possui participantes.");
-        return;
-      }
-
-      const { error } = await supabase
-        .from("events")
+      // 1. Excluir registros de custos
+      const { error: costError } = await supabase
+        .from('detalhe_de_custo')
         .delete()
-        .eq("id", eventId);
+        .eq('event_id', eventId);
 
-      if (error) throw error;
+      if (costError) {
+        console.error('Erro ao excluir custos:', costError);
+        throw costError;
+      }
 
-      setEvents((prevEvents) => prevEvents.filter(event => event.id !== eventId));
-      alert("Evento excluído com sucesso!");
-    } catch (err) {
-      console.error("Erro ao excluir evento:", err);
-      alert("Erro ao excluir evento. Tente novamente.");
+      // 2. Excluir registros de participantes
+      const { error: participantsError } = await supabase
+        .from('event_participants')
+        .delete()
+        .eq('event_id', eventId);
+
+      if (participantsError) {
+        console.error('Erro ao excluir participantes:', participantsError);
+        throw participantsError;
+      }
+
+      // 3. Excluir o evento
+      const { error: eventError } = await supabase
+        .from('events')
+        .delete()
+        .eq('id', eventId)
+        .single();
+
+      if (eventError) {
+        console.error('Erro ao excluir evento:', eventError);
+        throw eventError;
+      }
+
+      // 4. Atualizar o estado local
+      setEvents(prevEvents => prevEvents.filter(event => event.id !== eventId));
+
+      alert('Evento excluído com sucesso!');
+
+    } catch (error) {
+      console.error('Erro completo:', error);
+      alert('Erro ao excluir evento. Por favor, tente novamente.');
     }
   };
 
@@ -193,17 +212,17 @@ function EventHistory() {
           {/* Lista de eventos */}
           <div className="divide-y divide-gray-200">
             {events.map((event) => (
-              <EventListItem
+              <EventCard
                 key={event.id}
                 id={event.id}
                 title={event.title}
-                participantsCount={event.participantsCount}
-                totalValue={event.totalValue}
-                valuePerParticipant={event.valuePerParticipant}
-                status={event.status}
-                onFinalize={() => handleFinalize(event.id)}
-                onReopen={() => handleReopen(event.id)}
-                onDelete={() => handleDelete(event.id)}
+                participantes={event.participantsCount}
+                valorTotal={event.totalValue}
+                valorPorParticipante={event.valuePerParticipant}
+                status={event.status === 'active' ? 'Ativo' : 'Finalizado'}
+                onFinalizar={() => handleFinalize(event.id)}
+                onReabrir={() => handleReopen(event.id)}
+                onDelete={() => handleDeleteEvent(event.id)}
               />
             ))}
           </div>
