@@ -247,7 +247,7 @@ function EventHistory() {
                 </div>
                 
                 <div className="text-gray-600">
-                  {event.participantes || 0}
+                  {event.participantsCount || 0}
                 </div>
                 
                 <div className="text-gray-900 font-medium">
@@ -312,7 +312,7 @@ function EventHistory() {
               <div className="space-y-2 text-sm mb-4">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Participantes:</span>
-                  <span className="font-medium">{event.participantes || 0}</span>
+                  <span className="font-medium">{event.participantsCount || 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Valor Total:</span>
