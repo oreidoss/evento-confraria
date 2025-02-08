@@ -256,7 +256,10 @@ function EventDetails() {
         valor_total: 0,
         valor_a_pagar: 0,
         detalhes_custo: [],
-        participant: data.participant
+        participant: {
+          id: data.participant.id,
+          name: data.participant.name
+        }
       };
 
       setEventParticipants(prev => [...prev, newParticipant]);
