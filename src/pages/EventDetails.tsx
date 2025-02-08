@@ -19,7 +19,10 @@ interface ParticipantResponse {
   participant_id: string;
   participant_name: string;
   status: "pending" | "confirmed";
-  participant: Participant;
+  participant: {
+    id: string;
+    name: string;
+  };
 }
 
 interface ParticipantWithCosts extends ParticipantResponse {
@@ -223,7 +226,7 @@ function EventDetails() {
       }
 
       // Adicionar participante ao evento
-      const { data, error: insertError } = await supabase
+      const { data: responseData, error: insertError } = await supabase
         .from("event_participants")
         .insert({
           event_id: id,
@@ -244,27 +247,29 @@ function EventDetails() {
         `)
         .single();
 
-      if (insertError) {
+      if (insertError || !responseData) {
         console.error("Erro ao adicionar participante:", insertError);
         alert("Erro ao adicionar participante ao evento");
         return;
       }
 
-      // Adicionar o novo participante à lista de confirmados
+      // Criar o novo participante com a estrutura correta
       const newParticipant: ParticipantWithCosts = {
-        ...data,
+        id: responseData.id,
+        event_id: responseData.event_id,
+        participant_id: responseData.participant_id,
+        participant_name: responseData.participant_name,
+        status: responseData.status as "pending" | "confirmed",
+        participant: {
+          id: participant.id,
+          name: participant.name
+        },
         valor_total: 0,
         valor_a_pagar: 0,
-        detalhes_custo: [],
-        participant: {
-          id: data.participant.id,
-          name: data.participant.name
-        }
+        detalhes_custo: []
       };
 
       setEventParticipants(prev => [...prev, newParticipant]);
-
-      // Atualizar a lista de participantes disponíveis
       await fetchEventDetails();
 
     } catch (err) {
