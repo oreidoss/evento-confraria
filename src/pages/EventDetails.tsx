@@ -710,195 +710,105 @@ function EventDetails() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F1F0FB] p-3 sm:p-6">
-      <div className="max-w-7xl mx-auto">
-        <button
-          onClick={() => navigate("/historico-eventos")}
-          className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-2 mb-3"
-        >
-          ← Voltar
-        </button>
-
-        {loading ? (
-          <div className="flex justify-center items-center h-[60vh]">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#10B981]"></div>
+    <div className="min-h-screen bg-[#F8F7FF] p-6">
+      <div className="max-w-5xl mx-auto">
+        <div className="text-center mb-8">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <h1 className="text-3xl font-bold text-gray-900">
+              {event?.title}
+            </h1>
+            <button
+              onClick={() => {
+                setEditedTitle(event?.title || '');
+                setIsEditingTitle(true);
+              }}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <span className="text-xl">✏️</span>
+            </button>
           </div>
-        ) : error ? (
-          <div className="text-center text-red-600 bg-red-50 p-3 rounded">
-            {error}
-          </div>
-        ) : event ? (
-          <>
-            <div className="mb-4">
-              <div className="flex items-center gap-2">
-                {isEditingTitle ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editedTitle}
-                      onChange={(e) => setEditedTitle(e.target.value)}
-                      className="border rounded px-2 py-1 text-lg font-semibold text-gray-800"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleUpdateEventTitle(editedTitle)}
-                      className="text-green-600 hover:text-green-700"
-                    >
-                      ✓
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsEditingTitle(false);
-                        setEditedTitle(event?.title || '');
-                      }}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <h1 className="text-lg sm:text-xl font-semibold text-gray-800">
-                      {event?.title}
-                    </h1>
-                    <button
-                      onClick={() => {
-                        setEditedTitle(event?.title || '');
-                        setIsEditingTitle(true);
-                      }}
-                      className="text-gray-500 hover:text-gray-700"
-                    >
-                      <span className="text-xl">✏️</span>
-                    </button>
-                  </>
-                )}
-              </div>
-              <p className="text-sm text-gray-500">Nº {event.Número_evento || ''}</p>
-            </div>
+          <span className="inline-block px-4 py-1 rounded-full bg-[#E8FFF3] text-[#10B981] text-sm">
+            Em andamento
+          </span>
+        </div>
 
-            <div className="mb-4">
-              <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
-                event.status === "active" 
-                  ? "bg-green-100 text-green-800" 
-                  : "bg-red-100 text-red-800"
-              }`}>
-                {event.status === "active" ? "Em andamento" : "Finalizado"}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <h2 className="text-gray-600 mb-2">Valor Total</h2>
+            <p className="text-4xl font-bold">
+              {formatCurrency(calcularValorTotal())}
+            </p>
+          </div>
+          
+          <div className="bg-white rounded-xl p-6 shadow-sm">
+            <h2 className="text-gray-600 mb-2">Valor por Participante</h2>
+            <p className="text-4xl font-bold">
+              {formatCurrency(calcularValorPorParticipante())}
+            </p>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-sm mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-gray-400">👥</span>
+            <span className="text-xl font-semibold">
+              {getParticipantsByStatus("confirmed").length} participantes
+            </span>
+          </div>
+          <button
+            onClick={() => setIsNewParticipantModalOpen(true)}
+            className="bg-[#10B981] text-white px-6 py-3 rounded-lg hover:bg-[#0EA874] transition-colors flex items-center gap-2"
+          >
+            <span>👤</span>
+            Adicionar Participante
+          </button>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm">
+          <div className="p-6 border-b">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold">
+                Participantes confirmados
+              </h2>
+              <span className="text-gray-500">
+                Total: {getParticipantsByStatus("confirmed").length} participantes
               </span>
             </div>
+            <p className="text-gray-500 mt-1">
+              Custo total: {formatCurrency(calcularValorTotal())}
+            </p>
+          </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-              <div className="bg-white rounded p-3 shadow-sm">
-                <p className="text-xs text-gray-500 mb-1">Valor Total</p>
-                <p className="text-base font-medium">
-                  {formatCurrency(calcularValorTotal())}
-                </p>
-              </div>
-              
-              <div className="bg-white rounded p-3 shadow-sm">
-                <p className="text-xs text-gray-500 mb-1">Valor por Participante</p>
-                <p className="text-base font-medium">
-                  {formatCurrency(calcularValorPorParticipante())}
-                </p>
-              </div>
-              
-              <div className="bg-white rounded p-3 shadow-sm">
-                <p className="text-xs text-gray-500 mb-1">Total de Participantes</p>
-                <p className="text-base font-medium">
-                  {getParticipantsByStatus("confirmed").length}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-white rounded shadow-sm">
-                <div className="p-3 border-b">
-                  <h2 className="text-sm font-medium">
-                    Participantes Confirmados ({getParticipantsByStatus("confirmed").length})
-                  </h2>
-                </div>
-                
-                <div className="p-3">
-                  <div className="space-y-3">
-                    {getConfirmedParticipants().map((ep) => (
-                      <div key={ep.id} className="bg-gray-50 rounded p-3">
-                        <div className="flex justify-between items-start">
-                          <span className="text-base">{ep.participant.name}</span>
-                          <span className="text-gray-600">{formatCurrency(ep.valor_total || 0)}</span>
-                        </div>
-                        
-                        <div className={`mt-1 ${
-                          calcularSaldoParticipante(ep.valor_total || 0) >= 0 
-                            ? "text-green-600" 
-                            : "text-red-600"
-                        }`}>
-                          {calcularSaldoParticipante(ep.valor_total || 0) >= 0 ? "Receber" : "Pagar"}
-                          <div className="text-lg">
-                            {formatCurrency(Math.abs(calcularSaldoParticipante(ep.valor_total || 0)))}
-                          </div>
-                        </div>
-                        
-                        <div className="flex gap-4 mt-2 text-sm">
-                          <button
-                            onClick={() => handleOpenCostModal(ep)}
-                            className="text-blue-600 hover:underline"
-                          >
-                            adicionar valor
-                          </button>
-                          <button
-                            onClick={() => removeParticipantFromEvent(ep.participant_id)}
-                            className="text-red-600 hover:underline"
-                          >
-                            remover
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+          <div className="divide-y">
+            {getConfirmedParticipants().map((ep) => (
+              <div key={ep.id} className="p-6 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-medium">{ep.participant.name}</h3>
+                  <div className="flex items-center gap-4 mt-1">
+                    <span className="text-gray-500">
+                      Total: {formatCurrency(ep.valor_total || 0)}
+                    </span>
+                    <span className={ep.valor_total >= calcularValorPorParticipante() ? 'text-green-500' : 'text-red-500'}>
+                      {ep.valor_total >= calcularValorPorParticipante() ? 'A receber: ' : 'A pagar: '}
+                      {formatCurrency(Math.abs(ep.valor_total - calcularValorPorParticipante()))}
+                    </span>
                   </div>
                 </div>
-              </div>
-
-              <div className="bg-white rounded shadow-sm">
-                <div className="p-3 border-b">
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-sm font-medium">Participantes</h2>
-                    <button
-                      onClick={() => setIsNewParticipantModalOpen(true)}
-                      className="bg-[#4ADE80] text-white px-2 py-1 rounded text-xs hover:bg-green-500 transition-colors"
-                    >
-                      + Novo
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-3">
-                  <div className="space-y-2">
-                    {getAvailableParticipants().map(participant => (
-                      <div key={participant.id} 
-                        className="flex items-center justify-between p-2 bg-gray-50 rounded"
-                      >
-                        <span className="text-sm">{participant.name}</span>
-                        <div className="flex gap-4">
-                          <button
-                            onClick={() => addParticipantToEvent(participant.id)}
-                            className="text-green-600 hover:underline text-sm"
-                          >
-                            Confirmar
-                          </button>
-                          <button
-                            onClick={() => handleDeleteParticipant(participant.id)}
-                            className="text-red-600 hover:underline text-sm"
-                          >
-                            remover
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleOpenCostModal(ep)}
+                    className="text-[#10B981] hover:underline"
+                  >
+                    Adicionar valor
+                  </button>
+                  <button className="text-red-500 hover:text-red-700">
+                    <span>🗑️</span>
+                  </button>
                 </div>
               </div>
-            </div>
-          </>
-        ) : null}
+            ))}
+          </div>
+        </div>
       </div>
 
       {isModalOpen && selectedParticipant && (

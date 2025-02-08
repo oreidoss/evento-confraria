@@ -196,42 +196,167 @@ function EventHistory() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F1F0FB] p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Histórico de Eventos</h1>
+    <div className="min-h-screen bg-[#F8F7FF] p-4 sm:p-6">
+      <div className="max-w-5xl mx-auto">
+        {/* Cabeçalho */}
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
+            Histórico de Eventos
+          </h1>
+          <p className="text-sm sm:text-base text-gray-600">
+            Veja todos os eventos realizados e seus detalhes.
+          </p>
+        </div>
+
+        {/* Botão de Criar Novo Evento */}
+        <div className="flex justify-center sm:justify-end mb-6 sm:mb-8">
           <button
-            onClick={() => navigate('/novo-evento')}
-            className="px-4 py-2 bg-[#4ADE80] text-white rounded hover:bg-green-500 transition-colors"
+            onClick={() => navigate("/novo-evento")}
+            className="w-full sm:w-auto bg-[#10B981] text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg hover:bg-[#0EA874] transition-colors flex items-center justify-center gap-2"
           >
-            Novo Evento
+            <span>+</span>
+            Criar Novo Evento
           </button>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm">
-          {/* Lista de eventos */}
-          <div className="divide-y divide-gray-200">
-            {events.map((event) => (
-              <EventCard
-                key={event.id}
-                id={event.id}
-                title={event.title}
-                participantes={event.participantsCount}
-                valorTotal={event.totalValue}
-                valorPorParticipante={event.valuePerParticipant}
-                status={event.status === 'active' ? 'Ativo' : 'Finalizado'}
-                onFinalizar={() => handleFinalize(event.id)}
-                onReabrir={() => handleReopen(event.id)}
-                onDelete={() => handleDeleteEvent(event.id)}
-              />
-            ))}
+        {/* Tabela de Eventos - Versão Desktop */}
+        <div className="hidden sm:block bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="grid grid-cols-6 gap-4 p-4 bg-gray-50 border-b font-medium text-gray-600">
+            <div className="col-span-2">Nome do Evento</div>
+            <div>Status</div>
+            <div>Participantes</div>
+            <div>Valor Total</div>
+            <div>Ações</div>
           </div>
 
-          {events.length === 0 && (
-            <div className="text-center text-gray-500 p-8">
-              Nenhum evento encontrado
+          <div className="divide-y">
+            {events.map((event) => (
+              <div key={event.id} className="grid grid-cols-6 gap-4 p-4 items-center hover:bg-gray-50">
+                <div className="col-span-2 font-medium text-gray-900">
+                  {event.title}
+                </div>
+                
+                <div>
+                  <span className={`inline-block px-3 py-1 rounded-full text-sm ${
+                    event.status === "active"
+                      ? "bg-[#E8FFF3] text-[#10B981]"
+                      : "bg-red-100 text-red-600"
+                  }`}>
+                    {event.status === "active" ? "Em andamento" : "Finalizado"}
+                  </span>
+                </div>
+                
+                <div className="text-gray-600">
+                  {event.participantes || 0}
+                </div>
+                
+                <div className="text-gray-900 font-medium">
+                  {formatCurrency(event.totalValue || 0)}
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => navigate(`/evento/${event.id}`)}
+                    className="text-[#10B981] hover:text-[#0EA874]"
+                    title="Visualizar"
+                  >
+                    👁️
+                  </button>
+                  
+                  {event.status === "active" ? (
+                    <button
+                      onClick={() => handleFinalize(event.id)}
+                      className="text-green-600 hover:text-green-700"
+                      title="Finalizar"
+                    >
+                      ✓
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleReopen(event.id)}
+                      className="text-blue-600 hover:text-blue-700"
+                      title="Reabrir"
+                    >
+                      ↺
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={() => handleDeleteEvent(event.id)}
+                    className="text-red-500 hover:text-red-600"
+                    title="Excluir"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Cards de Eventos - Versão Mobile */}
+        <div className="sm:hidden space-y-4">
+          {events.map((event) => (
+            <div key={event.id} className="bg-white rounded-xl shadow-sm p-4">
+              <div className="flex justify-between items-start mb-3">
+                <h3 className="font-medium text-gray-900">{event.title}</h3>
+                <span className={`inline-block px-2 py-1 rounded-full text-xs ${
+                  event.status === "active"
+                    ? "bg-[#E8FFF3] text-[#10B981]"
+                    : "bg-red-100 text-red-600"
+                }`}>
+                  {event.status === "active" ? "Em andamento" : "Finalizado"}
+                </span>
+              </div>
+
+              <div className="space-y-2 text-sm mb-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Participantes:</span>
+                  <span className="font-medium">{event.participantes || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Valor Total:</span>
+                  <span className="font-medium">{formatCurrency(event.totalValue || 0)}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t">
+                <button
+                  onClick={() => navigate(`/evento/${event.id}`)}
+                  className="text-[#10B981] hover:text-[#0EA874]"
+                  title="Visualizar"
+                >
+                  👁️
+                </button>
+                
+                {event.status === "active" ? (
+                  <button
+                    onClick={() => handleFinalize(event.id)}
+                    className="text-green-600 hover:text-green-700"
+                    title="Finalizar"
+                  >
+                    ✓
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleReopen(event.id)}
+                    className="text-blue-600 hover:text-blue-700"
+                    title="Reabrir"
+                  >
+                    ↺
+                  </button>
+                )}
+                
+                <button
+                  onClick={() => handleDeleteEvent(event.id)}
+                  className="text-red-500 hover:text-red-600"
+                  title="Excluir"
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
     </div>
