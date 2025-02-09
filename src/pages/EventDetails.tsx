@@ -11,6 +11,9 @@ type Event = DatabaseTypes["public"]["Tables"]["events"]["Row"] & {
 interface Participant {
   id: string;
   name: string;
+  pix_key?: string | null;
+  created_at?: string;
+  status?: string;
 }
 
 interface ParticipantResponse {
@@ -22,6 +25,7 @@ interface ParticipantResponse {
   participant: {
     id: string;
     name: string;
+    pix_key: string | null;
   };
 }
 
@@ -45,6 +49,12 @@ interface CostDetail {
   itens: CostItem[];
 }
 
+interface NewParticipant {
+  name: string;
+  phone: string;
+  pix: string;
+}
+
 function EventDetails() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -65,10 +75,20 @@ function EventDetails() {
   });
   const [isNewParticipantModalOpen, setIsNewParticipantModalOpen] =
     useState(false);
-  const [newParticipant, setNewParticipant] = useState({ name: "", phone: "" });
+  const [newParticipant, setNewParticipant] = useState<NewParticipant>({ 
+    name: "", 
+    phone: "", 
+    pix: "" 
+  });
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
+  const [isEditParticipantModalOpen, setIsEditParticipantModalOpen] = useState(false);
+  const [editingParticipant, setEditingParticipant] = useState<{
+    id: string;
+    name: string;
+    pix_key: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!id) {
@@ -93,6 +113,7 @@ function EventDetails() {
         .from("events")
         .select("*")
         .eq("id", id)
+        .order('date', { ascending: false })
         .single();
 
       if (eventError) throw eventError;
@@ -118,7 +139,8 @@ function EventDetails() {
           status,
           participant:participants (
             id,
-            name
+            name,
+            pix_key
           )
         `)
         .eq("event_id", id);
@@ -196,13 +218,10 @@ function EventDetails() {
 
   // Função para mostrar apenas participantes válidos da tabela
   const getAvailableParticipants = () => {
-    // Retorna apenas participantes que existem na tabela participants
-    return participants
-      .filter(participant => 
-        // Filtra apenas os que não estão confirmados no evento atual
-        !eventParticipants.some(ep => ep.participant_id === participant.id)
-      )
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const available = participants.filter(participant => 
+      !eventParticipants.some(ep => ep.participant_id === participant.id)
+    );
+    return available.sort((a, b) => a.name.localeCompare(b.name));
   };
 
   // Função para obter participantes confirmados em ordem alfabética
@@ -262,7 +281,8 @@ function EventDetails() {
         status: responseData.status as "pending" | "confirmed",
         participant: {
           id: participant.id,
-          name: participant.name
+          name: participant.name,
+          pix_key: participant.pix_key
         },
         valor_total: 0,
         valor_a_pagar: 0,
@@ -378,16 +398,21 @@ function EventDetails() {
     return eventParticipants.filter((ep) => ep.status === status);
   };
 
-  // Função para formatar a data e hora
+  // Ajustar a função formatDateTime
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const diasDaSemana = [
+      'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 
+      'Quinta-feira', 'Sexta-feira', 'Sábado'
+    ];
+    const diaDaSemana = diasDaSemana[date.getDay()];
+    const dia = date.getDate().toString().padStart(2, '0');
+    const mes = (date.getMonth() + 1).toString().padStart(2, '0');
+    const ano = date.getFullYear();
+    const hora = date.getHours().toString().padStart(2, '0');
+    const minutos = date.getMinutes().toString().padStart(2, '0');
+
+    return `${diaDaSemana}, ${dia}/${mes}/${ano} às ${hora}:${minutos}`;
   };
 
   const handleConfirmParticipant = async (participantName: string) => {
@@ -567,7 +592,14 @@ function EventDetails() {
     }));
   };
 
-  // Adicione estas funções para calcular os totais
+  // Primeiro, vamos adicionar uma função para calcular o saldo do participante
+  const calcularSaldoParticipante = (valorContribuido: number) => {
+    const valorRateio = calcularValorPorParticipante();
+    const saldo = valorContribuido - valorRateio;
+    return saldo;
+  };
+
+  // Primeiro, vamos adicionar uma função para calcular o saldo do participante
   const calcularValorTotal = () => {
     return eventParticipants.reduce((total, participant) => {
       return total + (participant.valor_total || 0);
@@ -576,15 +608,8 @@ function EventDetails() {
 
   const calcularValorPorParticipante = () => {
     const total = calcularValorTotal();
-    const numeroParticipantes = getParticipantsByStatus("confirmed").length;
-    return numeroParticipantes > 0 ? total / numeroParticipantes : 0;
-  };
-
-  // Primeiro, vamos adicionar uma função para calcular o saldo do participante
-  const calcularSaldoParticipante = (valorContribuido: number) => {
-    const valorRateio = calcularValorPorParticipante();
-    const saldo = valorContribuido - valorRateio;
-    return saldo;
+    const numParticipantes = getParticipantsByStatus("confirmed").length;
+    return numParticipantes > 0 ? total / numParticipantes : 0;
   };
 
   const handleCreateParticipant = async () => {
@@ -594,25 +619,49 @@ function EventDetails() {
         return;
       }
 
-      // Insere apenas o nome na tabela participants
-      const { error } = await supabase
-        .from("participants")
-        .insert([{ name: newParticipant.name.trim() }]);
+      // Primeiro, verificar se já existe um participante com o mesmo nome
+      const { data: existingParticipant } = await supabase
+        .from('participants')
+        .select('name')
+        .eq('name', newParticipant.name.trim())
+        .single();
+
+      if (existingParticipant) {
+        alert('Já existe um participante com este nome');
+        return;
+      }
+
+      // Criar novo participante com nome e PIX
+      const { data, error } = await supabase
+        .from('participants')
+        .insert({
+          name: newParticipant.name.trim(),
+          pix_key: newParticipant.pix.trim() || null // Adiciona o PIX se existir
+        })
+        .select()
+        .single();
 
       if (error) {
-        console.error("Erro ao criar participante:", error);
+        console.error("Erro detalhado:", error);
         throw error;
       }
 
-      // Fecha o modal e limpa o formulário
+      // Fechar modal e limpar formulário
       setIsNewParticipantModalOpen(false);
-      setNewParticipant({ name: "", phone: "" });
+      setNewParticipant({ name: "", phone: "", pix: "" });
 
-      // Recarrega a lista de participantes
-      await fetchAllParticipants();
+      // Recarregar dados
+      await Promise.all([
+        fetchParticipants(),
+        fetchAllParticipants(),
+        fetchEventDetails()
+      ]);
+
+      alert("Participante adicionado com sucesso!");
+
     } catch (err) {
-      console.error("Erro ao criar participante:", err);
-      alert("Erro ao criar participante. Tente novamente.");
+      console.error("Erro detalhado ao criar participante:", err);
+      alert("Erro ao criar participante. Por favor, tente novamente.");
     }
   };
 
@@ -623,53 +672,56 @@ function EventDetails() {
         return;
       }
 
-      // 1. Verificar se o participante existe
-      const { data: participantExists, error: checkError } = await supabase
-        .from('participants')
-        .select('id')
-        .eq('id', participantId)
-        .single();
-
-      if (checkError || !participantExists) {
-        throw new Error('Participante não encontrado');
-      }
-
-      // 2. Excluir custos primeiro
-      await supabase
-        .from('detalhe_de_custo')
-        .delete()
-        .eq('participant_id', participantId);
-
-      // 3. Excluir relações com eventos
-      await supabase
+      // 1. Remover da tabela event_participants primeiro
+      const { error: eventParticipantsError } = await supabase
         .from('event_participants')
         .delete()
         .eq('participant_id', participantId);
 
-      // 4. Finalmente excluir o participante
-      const { error: deleteError } = await supabase
+      if (eventParticipantsError) {
+        console.error('Erro ao remover participante do evento:', eventParticipantsError);
+        throw eventParticipantsError;
+      }
+
+      // 2. Remover da tabela detalhe_de_custo
+      const { error: costError } = await supabase
+        .from('detalhe_de_custo')
+        .delete()
+        .eq('participant_id', participantId);
+
+      if (costError) {
+        console.error('Erro ao remover custos:', costError);
+        throw costError;
+      }
+
+      // 3. Remover da tabela participants
+      const { error: participantError } = await supabase
         .from('participants')
         .delete()
         .eq('id', participantId);
 
-      if (deleteError) {
-        throw deleteError;
+      if (participantError) {
+        console.error('Erro ao remover participante:', participantError);
+        throw participantError;
       }
 
-      // 5. Atualizar estados locais
+      // 4. Atualizar estados locais
       setParticipants(prev => prev.filter(p => p.id !== participantId));
-      setEventParticipants(prev => prev.filter(p => p.participant_id !== participantId));
       setAllParticipants(prev => prev.filter(p => p.id !== participantId));
+      setEventParticipants(prev => prev.filter(p => p.participant_id !== participantId));
 
-      // 6. Recarregar dados
-      await fetchParticipants();
-      await fetchEventDetails();
+      // 5. Recarregar dados
+      await Promise.all([
+        fetchParticipants(),
+        fetchAllParticipants(),
+        fetchEventDetails()
+      ]);
 
-      alert('Participante excluído com sucesso!');
+      alert('Participante removido com sucesso!');
 
     } catch (error) {
-      console.error('Erro ao excluir participante:', error);
-      alert('Erro ao excluir participante. Por favor, tente novamente.');
+      console.error('Erro ao remover participante:', error);
+      alert('Erro ao remover participante. Por favor, tente novamente.');
     }
   };
 
@@ -699,6 +751,202 @@ function EventDetails() {
     }
   };
 
+  // No componente EventDetails, adicionar verificação de status
+  const isEventFinished = event?.status === "finished";
+
+  const handleEditParticipantName = async (participantId: string) => {
+    const participant = participants.find(p => p.id === participantId);
+    if (!participant) return;
+
+    const newName = window.prompt('Digite o novo nome:', participant.name);
+    if (!newName || newName.trim() === participant.name) return;
+
+    try {
+      const { error } = await supabase
+        .from('participants')
+        .update({ name: newName.trim() })
+        .eq('id', participantId);
+
+      if (error) throw error;
+
+      // Recarregar dados
+      await Promise.all([
+        fetchParticipants(),
+        fetchAllParticipants(),
+        fetchEventDetails()
+      ]);
+
+      alert('Nome atualizado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao atualizar nome:', error);
+      alert('Erro ao atualizar nome. Por favor, tente novamente.');
+    }
+  };
+
+  const handleOpenEditModal = async (participantId: string) => {
+    try {
+      // Buscar o participante do estado local primeiro
+      const participantFromState = participants.find(p => p.id === participantId);
+      
+      if (!participantFromState) {
+        // Se não encontrar no estado, buscar do banco
+        const { data: participant, error: fetchError } = await supabase
+          .from('participants')
+          .select('id, name, pix_key')
+          .eq('id', participantId)
+          .single();
+
+        if (fetchError) {
+          console.error('Erro ao buscar participante:', fetchError);
+          throw fetchError;
+        }
+
+        if (!participant) {
+          alert('Participante não encontrado');
+          return;
+        }
+
+        setEditingParticipant({
+          id: participant.id,
+          name: participant.name,
+          pix_key: participant.pix_key
+        });
+      } else {
+        // Usar os dados do estado local
+        setEditingParticipant({
+          id: participantFromState.id,
+          name: participantFromState.name,
+          pix_key: participantFromState.pix_key || null
+        });
+      }
+      
+      // Abrir o modal
+      setIsEditParticipantModalOpen(true);
+    } catch (error) {
+      console.error('Erro ao abrir edição:', error);
+      alert('Erro ao abrir edição. Por favor, tente novamente.');
+    }
+  };
+
+  // Função para salvar as edições
+  const handleSaveParticipantEdit = async () => {
+    if (!editingParticipant) return;
+
+    try {
+      // Validar dados antes de atualizar
+      if (!editingParticipant.name.trim()) {
+        alert('O nome do participante é obrigatório');
+        return;
+      }
+
+      // Verificar se já existe outro participante com o mesmo nome
+      const { data: existingParticipant } = await supabase
+        .from('participants')
+        .select('id')
+        .eq('name', editingParticipant.name.trim())
+        .neq('id', editingParticipant.id) // Excluir o próprio participante da verificação
+        .single();
+
+      if (existingParticipant) {
+        alert('Já existe outro participante com este nome');
+        return;
+      }
+
+      // Atualizar o participante
+      const { error } = await supabase
+        .from('participants')
+        .update({
+          name: editingParticipant.name.trim(),
+          pix_key: editingParticipant.pix_key?.trim() || null
+        })
+        .eq('id', editingParticipant.id);
+
+      if (error) {
+        console.error('Erro detalhado:', error);
+        throw error;
+      }
+
+      // Recarregar dados
+      await Promise.all([
+        fetchParticipants(),
+        fetchAllParticipants(),
+        fetchEventDetails()
+      ]);
+
+      // Fechar modal e limpar estado
+      setIsEditParticipantModalOpen(false);
+      setEditingParticipant(null);
+      
+      alert('Participante atualizado com sucesso!');
+    } catch (error) {
+      console.error('Erro ao atualizar participante:', error);
+      alert('Erro ao atualizar participante. Por favor, tente novamente.');
+    }
+  };
+
+  // Adicionar função para calcular distribuição de pagamentos
+  const calcularDistribuicaoPagamentos = () => {
+    const valorPorPessoa = calcularValorPorParticipante();
+    const participantes = getConfirmedParticipants();
+    
+    // Separar quem deve pagar e quem deve receber
+    const devedores = participantes
+      .filter(p => (p.valor_total || 0) < valorPorPessoa)
+      .map(p => ({
+        ...p,
+        valorDevido: valorPorPessoa - (p.valor_total || 0)
+      }))
+      .sort((a, b) => b.valorDevido - a.valorDevido);
+
+    const credores = participantes
+      .filter(p => (p.valor_total || 0) > valorPorPessoa)
+      .map(p => ({
+        ...p,
+        valorAReceber: (p.valor_total || 0) - valorPorPessoa,
+        receberaDeQuem: [] as { nome: string; valor: number }[]
+      }))
+      .sort((a, b) => b.valorAReceber - a.valorAReceber);
+
+    // Distribuir pagamentos
+    devedores.forEach(devedor => {
+      let valorRestante = devedor.valorDevido;
+
+      for (const credor of credores) {
+        if (valorRestante <= 0) break;
+        
+        const valorDisponivel = credor.valorAReceber - credor.receberaDeQuem.reduce((sum, p) => sum + p.valor, 0);
+        const valorPagamento = Math.min(valorRestante, valorDisponivel);
+        
+        if (valorPagamento > 0) {
+          credor.receberaDeQuem.push({
+            nome: devedor.participant.name,
+            valor: valorPagamento
+          });
+          valorRestante -= valorPagamento;
+        }
+      }
+    });
+
+    return {
+      devedores: devedores.map(d => ({
+        nome: d.participant.name,
+        valorDevido: d.valorDevido,
+        devePagarPara: credores
+          .filter(c => c.receberaDeQuem.some(p => p.nome === d.participant.name))
+          .map(c => ({
+            nome: c.participant.name,
+            valor: c.receberaDeQuem.find(p => p.nome === d.participant.name)!.valor,
+            pix: c.participant.pix_key
+          }))
+      })),
+      credores: credores.map(c => ({
+        nome: c.participant.name,
+        valorTotal: c.valorAReceber,
+        receberaDeQuem: c.receberaDeQuem
+      }))
+    };
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F1F0FB] p-3 sm:p-6">
@@ -719,41 +967,35 @@ function EventDetails() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F7FF] p-6">
+    <div className="min-h-screen bg-[#F8F7FF] p-4">
       <div className="max-w-5xl mx-auto">
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <h1 className="text-3xl font-bold text-gray-900">
+        <button
+          onClick={() => navigate("/historico-eventos")}
+          className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+        >
+          <span>←</span>
+          <span>Voltar</span>
+        </button>
+
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <h1 className="text-2xl font-bold text-gray-900">
               {event?.title}
             </h1>
-            <button
-              onClick={() => {
-                setEditedTitle(event?.title || '');
-                setIsEditingTitle(true);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <span className="text-xl">✏️</span>
-            </button>
+            {!isEventFinished && (
+              <button
+                onClick={() => {
+                  setEditedTitle(event?.title || '');
+                  setIsEditingTitle(true);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <span className="text-xl">✏️</span>
+              </button>
+            )}
           </div>
-          <span className="inline-block px-4 py-1 rounded-full bg-[#E8FFF3] text-[#10B981] text-sm">
-            Em andamento
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <h2 className="text-gray-600 mb-2">Valor Total</h2>
-            <p className="text-4xl font-bold">
-              {formatCurrency(calcularValorTotal())}
-            </p>
-          </div>
-          
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <h2 className="text-gray-600 mb-2">Valor por Participante</h2>
-            <p className="text-4xl font-bold">
-              {formatCurrency(calcularValorPorParticipante())}
-            </p>
+          <div className="text-blue-500 bg-blue-50 px-3 py-1 rounded-md inline-block">
+            {event?.date ? formatDateTime(event.date) : 'Data não definida'}
           </div>
         </div>
 
@@ -764,16 +1006,18 @@ function EventDetails() {
               {getParticipantsByStatus("confirmed").length} participantes
             </span>
           </div>
-          <button
-            onClick={() => setIsNewParticipantModalOpen(true)}
-            className="bg-[#10B981] text-white px-6 py-3 rounded-lg hover:bg-[#0EA874] transition-colors flex items-center gap-2"
-          >
-            <span>👤</span>
-            Adicionar Participante
-          </button>
+          {!isEventFinished && (
+            <button
+              onClick={() => setIsNewParticipantModalOpen(true)}
+              className="bg-[#10B981] text-white px-6 py-3 rounded-lg hover:bg-[#0EA874] transition-colors flex items-center gap-2"
+            >
+              <span>👤</span>
+              Adicionar Participante
+            </button>
+          )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm">
+        <div className="bg-white rounded-xl shadow-sm mb-8">
           <div className="p-6 border-b">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-semibold">
@@ -783,41 +1027,172 @@ function EventDetails() {
                 Total: {getParticipantsByStatus("confirmed").length} participantes
               </span>
             </div>
-            <p className="text-gray-500 mt-1">
-              Custo total: {formatCurrency(calcularValorTotal())}
-            </p>
+            <div className="flex gap-6 mt-1">
+              <p className="text-gray-500">
+                Custo total: {formatCurrency(calcularValorTotal())}
+              </p>
+              <p className="text-gray-500">
+                Valor por participante: {formatCurrency(calcularValorPorParticipante())}
+              </p>
+            </div>
           </div>
 
           <div className="divide-y">
             {getConfirmedParticipants().map((ep) => (
               <div key={ep.id} className="p-6 flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-medium">{ep.participant.name}</h3>
-                  <div className="flex items-center gap-4 mt-1">
-                    <span className="text-gray-500">
-                      Total: {formatCurrency(ep.valor_total || 0)}
-                    </span>
+                  <div className="flex items-center gap-4 mb-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-medium">{ep.participant.name}</h3>
+                      {!isEventFinished && (
+                        <button
+                          onClick={() => handleEditParticipantName(ep.participant_id)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <span className="text-sm">✏️</span>
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-500">
+                        {ep.participant.pix_key ? `PIX: ${ep.participant.pix_key}` : 'PIX não cadastrado'}
+                      </span>
+                      {!isEventFinished && (
+                        <button
+                          onClick={() => handleOpenEditModal(ep.participant_id)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <span className="text-sm">✏️</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">
+                        Total: {formatCurrency(ep.valor_total || 0)}
+                      </span>
+                      {!isEventFinished && (
+                        <button
+                          onClick={() => handleOpenCostModal(ep)}
+                          className="text-[#10B981] text-xs hover:underline"
+                        >
+                          adicionar valor
+                        </button>
+                      )}
+                    </div>
                     <span className={ep.valor_total >= calcularValorPorParticipante() ? 'text-green-500' : 'text-red-500'}>
                       {ep.valor_total >= calcularValorPorParticipante() ? 'A receber: ' : 'A pagar: '}
                       {formatCurrency(Math.abs(ep.valor_total - calcularValorPorParticipante()))}
                     </span>
+                    
+                    {/* Para quem deve pagar */}
+                    {ep.valor_total < calcularValorPorParticipante() && (
+                      <div className="text-sm text-gray-600 mt-1">
+                        <p>Pagar para:</p>
+                        {calcularDistribuicaoPagamentos()
+                          .devedores
+                          .find(d => d.nome === ep.participant.name)
+                          ?.devePagarPara.map((pagamento, index) => (
+                            <div key={index} className="ml-2 flex items-center gap-2">
+                              <span>
+                                → {pagamento.nome}: {formatCurrency(pagamento.valor)}
+                              </span>
+                              {pagamento.pix && (
+                                <span className="text-gray-500">
+                                  (PIX: {pagamento.pix})
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+
+                    {/* De quem vai receber */}
+                    {ep.valor_total > calcularValorPorParticipante() && (
+                      <div className="text-sm text-gray-600 mt-1">
+                        <p>Receberá de:</p>
+                        {calcularDistribuicaoPagamentos()
+                          .credores
+                          .find(c => c.nome === ep.participant.name)
+                          ?.receberaDeQuem.map((pagamento, index) => (
+                            <div key={index} className="ml-2">
+                              ← {pagamento.nome}: {formatCurrency(pagamento.valor)}
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => handleOpenCostModal(ep)}
-                    className="text-[#10B981] hover:underline"
+                {!isEventFinished && (
+                  <button 
+                    onClick={() => handleDeleteParticipant(ep.participant_id)}
+                    className="text-red-500 hover:text-red-700"
                   >
-                    Adicionar valor
-                  </button>
-                  <button className="text-red-500 hover:text-red-700">
                     <span>🗑️</span>
                   </button>
-                </div>
+                )}
               </div>
             ))}
           </div>
         </div>
+
+        {!isEventFinished && (
+          <div className="bg-white rounded-xl shadow-sm mb-8">
+            <div className="p-6 border-b">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold">
+                  Participantes Disponíveis
+                </h2>
+                <button
+                  onClick={() => setIsNewParticipantModalOpen(true)}
+                  className="text-sm bg-[#10B981] text-white px-4 py-2 rounded-lg hover:bg-[#0EA874] transition-colors"
+                >
+                  + Novo
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3">
+              <div className="space-y-2">
+                {getAvailableParticipants().map(participant => (
+                  <div key={participant.id} 
+                    className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  >
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm">{participant.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-500">
+                          {participant.pix_key ? `PIX: ${participant.pix_key}` : 'Update column Pix from participants'}
+                        </span>
+                        <button
+                          onClick={() => handleOpenEditModal(participant.id)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <span className="text-sm">✏️</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex gap-4">
+                      <button
+                        onClick={() => addParticipantToEvent(participant.id)}
+                        className="text-green-600 hover:underline text-sm"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() => handleDeleteParticipant(participant.id)}
+                        className="text-red-600 hover:underline text-sm"
+                      >
+                        remover
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {isModalOpen && selectedParticipant && (
@@ -927,41 +1302,38 @@ function EventDetails() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <h3 className="text-lg font-medium mb-4">Novo Participante</h3>
-
+            
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nome *
+                  Nome do Participante
                 </label>
                 <input
                   type="text"
                   value={newParticipant.name}
-                  onChange={(e) =>
-                    setNewParticipant((prev) => ({
-                      ...prev,
-                      name: e.target.value,
-                    }))
-                  }
+                  onChange={(e) => setNewParticipant(prev => ({ 
+                    ...prev, 
+                    name: e.target.value 
+                  }))}
                   className="w-full p-2 border rounded-md"
-                  placeholder="Digite o nome..."
+                  placeholder="Digite o nome do participante"
+                  autoFocus
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Telefone
+                  Chave Pix (opcional)
                 </label>
                 <input
-                  type="tel"
-                  value={newParticipant.phone}
-                  onChange={(e) =>
-                    setNewParticipant((prev) => ({
-                      ...prev,
-                      phone: e.target.value,
-                    }))
-                  }
+                  type="text"
+                  value={newParticipant.pix}
+                  onChange={(e) => setNewParticipant(prev => ({ 
+                    ...prev, 
+                    pix: e.target.value 
+                  }))}
                   className="w-full p-2 border rounded-md"
-                  placeholder="Digite o telefone (opcional)..."
+                  placeholder="Digite a chave Pix (opcional)"
                 />
               </div>
             </div>
@@ -975,6 +1347,64 @@ function EventDetails() {
               </button>
               <button
                 onClick={handleCreateParticipant}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
+              >
+                Adicionar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Edição de Participante */}
+      {isEditParticipantModalOpen && editingParticipant && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-medium mb-4">Editar Participante</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nome do Participante
+                </label>
+                <input
+                  type="text"
+                  value={editingParticipant.name}
+                  onChange={(e) => setEditingParticipant(prev => ({
+                    ...prev!,
+                    name: e.target.value
+                  }))}
+                  className="w-full p-2 border rounded-md"
+                  placeholder="Digite o nome do participante"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Chave Pix
+                </label>
+                <input
+                  type="text"
+                  value={editingParticipant.pix_key || ''}
+                  onChange={(e) => setEditingParticipant(prev => ({
+                    ...prev!,
+                    pix_key: e.target.value
+                  }))}
+                  className="w-full p-2 border rounded-md"
+                  placeholder="Digite a chave Pix"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                onClick={() => setIsEditParticipantModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveParticipantEdit}
                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md"
               >
                 Salvar

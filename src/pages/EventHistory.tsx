@@ -31,58 +31,49 @@ function EventHistory() {
   const fetchEvents = async () => {
     try {
       setLoading(true);
-      // Primeiro, buscar os eventos básicos
+      
+      // Buscar eventos básicos
       const { data: eventsData, error: eventsError } = await supabase
         .from("events")
         .select("*")
-        .order("created_at", { ascending: false });
+        .order('date', { ascending: false });
 
       if (eventsError) throw eventsError;
 
-      if (!eventsData) {
-        setEvents([]);
-        return;
-      }
-
       // Para cada evento, buscar participantes e custos
       const eventsWithDetails = await Promise.all(
-        eventsData.map(async (event) => {
-          // Buscar participantes confirmados
+        (eventsData || []).map(async (event) => {
+          // Buscar número de participantes confirmados
           const { count: participantsCount } = await supabase
             .from("event_participants")
             .select("*", { count: "exact", head: true })
             .eq("event_id", event.id)
             .eq("status", "confirmed");
 
-          // Buscar todos os custos do evento
+          // Buscar valor total dos custos
           const { data: costDetails } = await supabase
             .from("detalhe_de_custo")
             .select("valor_por_participante")
             .eq("event_id", event.id);
 
-          // Calcular valor total
           const totalValue = costDetails?.reduce(
             (sum, item) => sum + (Number(item.valor_por_participante) || 0),
             0
           ) || 0;
 
-          // Calcular valor por participante
-          const valuePerParticipant = participantsCount && participantsCount > 0
-            ? totalValue / participantsCount
-            : 0;
-
           return {
             ...event,
             participantsCount: participantsCount || 0,
             totalValue,
-            valuePerParticipant
+            valuePerParticipant: participantsCount ? totalValue / participantsCount : 0
           };
         })
       );
 
       setEvents(eventsWithDetails);
     } catch (err) {
-      console.error("Erro ao buscar eventos:", err);
+      console.error("Erro ao carregar eventos:", err);
+      setError("Erro ao carregar eventos");
     } finally {
       setLoading(false);
     }
@@ -94,6 +85,22 @@ function EventHistory() {
       style: "currency",
       currency: "BRL",
     }).format(value);
+  };
+
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const diasDaSemana = [
+      'Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 
+      'Quinta-feira', 'Sexta-feira', 'Sábado'
+    ];
+    const diaDaSemana = diasDaSemana[date.getDay()];
+    const dia = date.getDate().toString().padStart(2, '0');
+    const mes = (date.getMonth() + 1).toString().padStart(2, '0');
+    const ano = date.getFullYear();
+    const hora = date.getHours().toString().padStart(2, '0');
+    const minutos = date.getMinutes().toString().padStart(2, '0');
+
+    return `${diaDaSemana}, ${dia}/${mes}/${ano} às ${hora}:${minutos}`;
   };
 
   const handleFinalize = async (eventId: string) => {
@@ -232,8 +239,11 @@ function EventHistory() {
           <div className="divide-y">
             {events.map((event) => (
               <div key={event.id} className="grid grid-cols-6 gap-4 p-4 items-center hover:bg-gray-50">
-                <div className="col-span-2 font-medium text-gray-900">
-                  {event.title}
+                <div className="col-span-2">
+                  <div className="font-medium text-gray-900 mb-1">{event.title}</div>
+                  <div className="text-blue-500 bg-blue-50 px-3 py-1 rounded-md inline-block text-sm">
+                    {event.date ? formatDateTime(event.date) : 'Data não definida'}
+                  </div>
                 </div>
                 
                 <div>
@@ -297,26 +307,40 @@ function EventHistory() {
         {/* Cards de Eventos - Versão Mobile */}
         <div className="sm:hidden space-y-4">
           {events.map((event) => (
-            <div key={event.id} className="bg-white rounded-xl shadow-sm p-4">
-              <div className="flex justify-between items-start mb-3">
-                <h3 className="font-medium text-gray-900">{event.title}</h3>
-                <span className={`inline-block px-2 py-1 rounded-full text-xs ${
-                  event.status === "active"
-                    ? "bg-[#E8FFF3] text-[#10B981]"
-                    : "bg-red-100 text-red-600"
-                }`}>
+            <div key={event.id} className="bg-white rounded-xl shadow-sm p-6">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-2xl font-bold mb-2">{event.title}</h3>
+                  <div className="text-blue-500 bg-blue-50 px-3 py-1 rounded-md inline-block">
+                    {event.date ? formatDateTime(event.date) : 'Data não definida'}
+                  </div>
+                </div>
+                <span className="inline-block px-4 py-1 rounded-full bg-[#E8FFF3] text-[#10B981] text-sm">
                   {event.status === "active" ? "Em andamento" : "Finalizado"}
                 </span>
               </div>
 
-              <div className="space-y-2 text-sm mb-4">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Participantes:</span>
-                  <span className="font-medium">{event.participantsCount || 0}</span>
+              {/* Valores em linha */}
+              <div className="flex gap-12 mb-4">
+                <div className="flex flex-col">
+                  <span className="text-gray-600 text-sm">Participantes</span>
+                  <span className="font-medium text-xl">
+                    {event.participantsCount || 0}
+                  </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Valor Total:</span>
-                  <span className="font-medium">{formatCurrency(event.totalValue || 0)}</span>
+
+                <div className="flex flex-col">
+                  <span className="text-gray-600 text-sm">Valor Total</span>
+                  <span className="font-medium text-xl">
+                    {formatCurrency(event.totalValue || 0)}
+                  </span>
+                </div>
+
+                <div className="flex flex-col">
+                  <span className="text-gray-600 text-sm">Valor por pessoa</span>
+                  <span className="font-medium text-xl">
+                    {formatCurrency((event.totalValue || 0) / (event.participantsCount || 1))}
+                  </span>
                 </div>
               </div>
 
